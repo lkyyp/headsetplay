@@ -8,7 +8,7 @@
         <dict>
             <key>cell</key><string>PSGroupCell</string>
             <key>label</key><string>基本设置</string>
-            <key>footerText</key><string>连接蓝牙耳机或车载音频后，系统耳机电量弹窗大约 5 秒后会主动关掉，再在后台打开所选音乐 App 并继续播放。摘下耳机暂停后不会再自动播放。键盘、手表等非音频设备不会触发。</string>
+            <key>footerText</key><string>连接蓝牙耳机或车载音频后，尝试在后台打开所选音乐 App 并继续播放。本测试版不会自动关闭系统耳机弹窗。</string>
         </dict>
         <dict>
             <key>cell</key><string>PSSwitchCell</string>
