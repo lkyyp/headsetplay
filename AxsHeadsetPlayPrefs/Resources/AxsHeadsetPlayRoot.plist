@@ -8,7 +8,7 @@
         <dict>
             <key>cell</key><string>PSGroupCell</string>
             <key>label</key><string>基本设置</string>
-            <key>footerText</key><string>连接蓝牙耳机或车载音频后，自动打开所选音乐 App。键盘、手表等非音频设备不会触发。</string>
+            <key>footerText</key><string>连接蓝牙耳机或车载音频后，在后台打开所选音乐 App 并继续播放，不抢到前台。系统耳机弹窗可以忽略。键盘、手表等非音频设备不会触发。</string>
         </dict>
         <dict>
             <key>cell</key><string>PSSwitchCell</string>
@@ -34,7 +34,7 @@
         <dict>
             <key>cell</key><string>PSGroupCell</string>
             <key>label</key><string>播放行为</string>
-            <key>footerText</key><string>打开后继续播放会在 App 启动后再发播放指令。正在播放时不打断可避免切走当前歌曲。</string>
+            <key>footerText</key><string>后台打开后会多次发送播放指令。正在播放时不打断可避免切走当前歌曲。</string>
         </dict>
         <dict>
             <key>cell</key><string>PSSwitchCell</string>
