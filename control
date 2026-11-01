@@ -1,0 +1,11 @@
+Package: com.axs.headsetplay
+Name: 蓝牙耳机续播
+Version: 5.2.0
+Architecture: iphoneos-arm
+Description: 蓝牙耳机连接后自动打开所选音乐 App 并继续播放
+Maintainer: Axs
+Author: Axs
+Section: Axs-Tweaks
+Depends: mobilesubstrate, preferenceloader
+Icon: https://axs66.github.io/pro/icon/headsetplay.png
+Sileodepiction: https://axs66.github.io/pro/sileodepiction/headsetplay/js.json

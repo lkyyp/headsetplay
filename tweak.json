@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "name": "HeadsetPlay",
+  "id": "headsetplay",
+  "display_name": "蓝牙耳机续播",
+  "class_prefix": "AxsHeadsetPlay",
+  "symbol_prefix": "axs_headsetplay",
+  "package": "com.axs.headsetplay",
+  "bundle": "com.apple.springboard",
+  "sdk_version": "16.5",
+  "minimum_ios": "14.0",
+  "preferences": true,
+  "slider": false,
+  "github_actions": true
+}

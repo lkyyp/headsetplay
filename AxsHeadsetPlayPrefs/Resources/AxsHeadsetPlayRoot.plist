@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>title</key><string>蓝牙耳机续播</string>
+    <key>items</key>
+    <array>
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>基本设置</string>
+            <key>footerText</key><string>连接蓝牙耳机或车载音频后，自动打开所选音乐 App。键盘、手表等非音频设备不会触发。</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>启用插件</string>
+            <key>key</key><string>enabled</string>
+            <key>defaults</key><string>com.axs.headsetplay</string>
+            <key>default</key><false/>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>音乐 App</string>
+            <key>footerText</key><string>未安装的 App 不会被打开。酷我、酷狗等会自动尝试备用包名。</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSLinkListCell</string>
+            <key>detail</key><string>AxsHeadsetPlayAppListController</string>
+            <key>label</key><string>自动打开</string>
+            <key>key</key><string>musicApp</string>
+            <key>defaults</key><string>com.axs.headsetplay</string>
+            <key>default</key><string>com.netease.cloudmusic</string>
+            <key>get</key><string>axs_headsetplay_musicAppPreview:</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>播放行为</string>
+            <key>footerText</key><string>打开后继续播放会在 App 启动后再发播放指令。正在播放时不打断可避免切走当前歌曲。</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>打开后继续播放</string>
+            <key>key</key><string>autoPlay</string>
+            <key>defaults</key><string>com.axs.headsetplay</string>
+            <key>default</key><true/>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>正在播放时不打断</string>
+            <key>key</key><string>skipIfPlaying</string>
+            <key>defaults</key><string>com.axs.headsetplay</string>
+            <key>default</key><true/>
+        </dict>
+    </array>
+</dict>
+</plist>
