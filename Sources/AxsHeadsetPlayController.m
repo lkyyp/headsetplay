@@ -1,6 +1,7 @@
 #import "AxsHeadsetPlayController.h"
 #import "AxsHeadsetPlayCatalog.h"
 #import "AxsHeadsetPlayConfig.h"
+#import "AxsHeadsetPlayPopup.h"
 #import "AxsHeadsetPlayPrivate.h"
 
 #import <AVFoundation/AVFoundation.h>
@@ -476,6 +477,7 @@ static void axs_headsetplay_scheduleAfterAudioConnect(void) {
     });
     gAxsHeadsetPlayPending = work;
     os_unfair_lock_unlock(&gAxsHeadsetPlayLock);
+    axs_headsetplay_scheduleSystemHeadsetCardDismiss();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kAxsHeadsetPlayConnectDelayNs), dispatch_get_main_queue(), work);
 }
 
