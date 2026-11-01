@@ -9,11 +9,11 @@
 #import <objc/runtime.h>
 #import <os/lock.h>
 
-static const NSTimeInterval kAxsHeadsetPlayCooldown = 12.0;
-static const int64_t kAxsHeadsetPlayConnectDelayNs = (int64_t)(2.6 * NSEC_PER_SEC);
+static const NSTimeInterval kAxsHeadsetPlayCooldown = 4.0;
+static const int64_t kAxsHeadsetPlayConnectDelayNs = (int64_t)(5.8 * NSEC_PER_SEC);
 static const int64_t kAxsHeadsetPlayRouteWaitNs = (int64_t)(1.0 * NSEC_PER_SEC);
-static const NSTimeInterval kAxsHeadsetPlayRetryDelays[] = {1.8, 3.8, 6.5, 10.0};
-enum { kAxsHeadsetPlayRetryCount = 4 };
+static const NSTimeInterval kAxsHeadsetPlayRetryDelays[] = {1.6, 3.2};
+enum { kAxsHeadsetPlayRetryCount = 2 };
 enum { kAxsHeadsetPlayMRPlay = 0 };
 
 static os_unfair_lock gAxsHeadsetPlayLock = OS_UNFAIR_LOCK_INIT;
@@ -22,9 +22,12 @@ static dispatch_block_t gAxsHeadsetPlayPending = nil;
 static NSSet<NSString *> *gAxsHeadsetPlayKnownAddresses = nil;
 static BOOL gAxsHeadsetPlayHasBaseline = NO;
 static NSUInteger gAxsHeadsetPlayGeneration = 0;
+static BOOL gAxsHeadsetPlayDidPlay = NO;
 
 static void (*axs_headsetplay_MRMediaRemoteSendCommand)(int command, id userInfo);
 static void (*axs_headsetplay_MRMediaRemoteGetNowPlayingApplicationIsPlaying)(dispatch_queue_t queue, void (^block)(Boolean isPlaying));
+
+static void axs_headsetplay_abortSession(void);
 
 static void axs_headsetplay_loadMediaRemote(void) {
     static dispatch_once_t onceToken;
@@ -64,42 +67,35 @@ static BOOL axs_headsetplay_applicationInstalled(NSString *bundleID) {
     return [workspace applicationIsInstalled:bundleID];
 }
 
+static BOOL axs_headsetplay_applicationIsRunning(NSString *bundleID) {
+    if (bundleID.length == 0) {
+        return NO;
+    }
+    Class controllerClass = objc_getClass("SBApplicationController");
+    id controller = controllerClass
+        ? ((id (*)(id, SEL))objc_msgSend)(controllerClass, @selector(sharedInstance))
+        : nil;
+    if (![controller respondsToSelector:@selector(applicationWithBundleIdentifier:)]) {
+        return NO;
+    }
+    id application = ((id (*)(id, SEL, NSString *))objc_msgSend)(
+        controller, @selector(applicationWithBundleIdentifier:), bundleID);
+    if (![application respondsToSelector:@selector(isRunning)]) {
+        return NO;
+    }
+    return ((BOOL (*)(id, SEL))objc_msgSend)(application, @selector(isRunning));
+}
+
 static BOOL axs_headsetplay_openApplicationSuspended(NSString *bundleID) {
     if (bundleID.length == 0) {
         return NO;
     }
+    if (axs_headsetplay_applicationIsRunning(bundleID)) {
+        return YES;
+    }
     UIApplication *application = [UIApplication sharedApplication];
     if ([application respondsToSelector:@selector(launchApplicationWithIdentifier:suspended:)]) {
-        if ([application launchApplicationWithIdentifier:bundleID suspended:YES]) {
-            return YES;
-        }
-    }
-    Class serviceClass = objc_getClass("FBSSystemService");
-    FBSSystemService *service = serviceClass
-        ? ((id (*)(id, SEL))objc_msgSend)(serviceClass, @selector(sharedService))
-        : nil;
-    if (!service) {
-        return NO;
-    }
-    NSDictionary *options = @{
-        @"__ActivateSuspended": @YES,
-        @"LSLaunchSuspendedAlways": @YES,
-        @"UnlockDevice": @YES
-    };
-    if ([service respondsToSelector:@selector(openApplication:options:withResult:)]) {
-        ((void (*)(id, SEL, NSString *, NSDictionary *, id))objc_msgSend)(
-            service, @selector(openApplication:options:withResult:), bundleID, options, nil);
-        return YES;
-    }
-    if ([service respondsToSelector:@selector(openApplication:options:clientPort:withResult:)]) {
-        unsigned int port = 0;
-        if ([service respondsToSelector:@selector(createClientPort)]) {
-            port = ((unsigned int (*)(id, SEL))objc_msgSend)(service, @selector(createClientPort));
-        }
-        ((void (*)(id, SEL, NSString *, NSDictionary *, unsigned int, id))objc_msgSend)(
-            service, @selector(openApplication:options:clientPort:withResult:),
-            bundleID, options, port, nil);
-        return YES;
+        return [application launchApplicationWithIdentifier:bundleID suspended:YES];
     }
     return NO;
 }
@@ -193,25 +189,72 @@ BOOL axs_headsetplay_isAudioDevice(id device) {
     return axs_headsetplay_nameLooksLikeAudio(name);
 }
 
-static NSSet<NSString *> *axs_headsetplay_connectedAddresses(void) {
+static NSString *axs_headsetplay_deviceAddress(id device) {
+    if (![device respondsToSelector:@selector(address)]) {
+        return nil;
+    }
+    return ((NSString *(*)(id, SEL))objc_msgSend)(device, @selector(address));
+}
+
+static BOOL axs_headsetplay_deviceIsInEar(id device) {
+    if ([device respondsToSelector:@selector(inEar)]) {
+        return ((BOOL (*)(id, SEL))objc_msgSend)(device, @selector(inEar));
+    }
+    if ([device respondsToSelector:@selector(isInEar)]) {
+        return ((BOOL (*)(id, SEL))objc_msgSend)(device, @selector(isInEar));
+    }
+    return YES;
+}
+
+static BOOL axs_headsetplay_deviceReportsEarState(id device) {
+    return [device respondsToSelector:@selector(inEar)] || [device respondsToSelector:@selector(isInEar)];
+}
+
+static NSArray *axs_headsetplay_connectedDevices(void) {
     Class managerClass = objc_getClass("BluetoothManager");
     BluetoothManager *manager = managerClass
         ? ((id (*)(id, SEL))objc_msgSend)(managerClass, @selector(sharedInstance))
         : nil;
     if (![manager respondsToSelector:@selector(connectedDevices)]) {
-        return [NSSet set];
+        return @[];
     }
+    NSArray *devices = [manager connectedDevices];
+    return [devices isKindOfClass:[NSArray class]] ? devices : @[];
+}
+
+static NSSet<NSString *> *axs_headsetplay_connectedAddresses(void) {
     NSMutableSet<NSString *> *addresses = [NSMutableSet set];
-    for (id device in [manager connectedDevices]) {
-        NSString *address = nil;
-        if ([device respondsToSelector:@selector(address)]) {
-            address = ((NSString *(*)(id, SEL))objc_msgSend)(device, @selector(address));
-        }
+    for (id device in axs_headsetplay_connectedDevices()) {
+        NSString *address = axs_headsetplay_deviceAddress(device);
         if (address.length > 0) {
             [addresses addObject:address];
         }
     }
     return addresses;
+}
+
+static BOOL axs_headsetplay_hasConnectedAudioDevice(void) {
+    for (id device in axs_headsetplay_connectedDevices()) {
+        if (axs_headsetplay_isAudioDevice(device)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL axs_headsetplay_shouldSkipBecauseOutOfEar(void) {
+    BOOL sawEarState = NO;
+    BOOL anyInEar = NO;
+    for (id device in axs_headsetplay_connectedDevices()) {
+        if (!axs_headsetplay_isAudioDevice(device) || !axs_headsetplay_deviceReportsEarState(device)) {
+            continue;
+        }
+        sawEarState = YES;
+        if (axs_headsetplay_deviceIsInEar(device)) {
+            anyInEar = YES;
+        }
+    }
+    return sawEarState && !anyInEar;
 }
 
 static BOOL axs_headsetplay_routeHasBluetoothOutput(AVAudioSessionRouteDescription *route) {
@@ -226,21 +269,6 @@ static BOOL axs_headsetplay_routeHasBluetoothOutput(AVAudioSessionRouteDescripti
     return NO;
 }
 
-static void axs_headsetplay_sendPlay(void) {
-    if (axs_headsetplay_MRMediaRemoteSendCommand) {
-        NSDictionary *info = @{@"kMRMediaRemoteOptionDisableImplicitAppLaunch": @YES};
-        axs_headsetplay_MRMediaRemoteSendCommand(kAxsHeadsetPlayMRPlay, info);
-        axs_headsetplay_MRMediaRemoteSendCommand(kAxsHeadsetPlayMRPlay, nil);
-    }
-    Class mediaClass = objc_getClass("SBMediaController");
-    SBMediaController *media = mediaClass
-        ? ((id (*)(id, SEL))objc_msgSend)(mediaClass, @selector(sharedInstance))
-        : nil;
-    if ([media respondsToSelector:@selector(play)]) {
-        ((BOOL (*)(id, SEL))objc_msgSend)(media, @selector(play));
-    }
-}
-
 static BOOL axs_headsetplay_generationIsCurrent(NSUInteger generation) {
     os_unfair_lock_lock(&gAxsHeadsetPlayLock);
     BOOL current = (generation == gAxsHeadsetPlayGeneration);
@@ -248,36 +276,115 @@ static BOOL axs_headsetplay_generationIsCurrent(NSUInteger generation) {
     return current;
 }
 
+static void axs_headsetplay_abortSession(void) {
+    os_unfair_lock_lock(&gAxsHeadsetPlayLock);
+    if (gAxsHeadsetPlayPending) {
+        dispatch_block_cancel(gAxsHeadsetPlayPending);
+        gAxsHeadsetPlayPending = nil;
+    }
+    gAxsHeadsetPlayGeneration += 1;
+    gAxsHeadsetPlayDidPlay = NO;
+    gAxsHeadsetPlayLastFire = 0;
+    os_unfair_lock_unlock(&gAxsHeadsetPlayLock);
+}
+
+static BOOL axs_headsetplay_sessionStillValid(NSUInteger generation) {
+    if (!axs_headsetplay_generationIsCurrent(generation)) {
+        return NO;
+    }
+    if (!axs_headsetplay_hasConnectedAudioDevice()) {
+        axs_headsetplay_abortSession();
+        return NO;
+    }
+    if (!axs_headsetplay_routeHasBluetoothOutput([AVAudioSession sharedInstance].currentRoute)) {
+        axs_headsetplay_abortSession();
+        return NO;
+    }
+    if (axs_headsetplay_shouldSkipBecauseOutOfEar()) {
+        axs_headsetplay_abortSession();
+        return NO;
+    }
+    return YES;
+}
+
+static void axs_headsetplay_sendPlay(void) {
+    if (!axs_headsetplay_MRMediaRemoteSendCommand) {
+        return;
+    }
+    NSDictionary *info = @{@"kMRMediaRemoteOptionDisableImplicitAppLaunch": @YES};
+    axs_headsetplay_MRMediaRemoteSendCommand(kAxsHeadsetPlayMRPlay, info);
+}
+
+static void axs_headsetplay_watchPlayback(NSUInteger generation, NSUInteger remaining) {
+    if (remaining == 0) {
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!axs_headsetplay_generationIsCurrent(generation)) {
+            return;
+        }
+        axs_headsetplay_queryPlaying(^(BOOL playing) {
+            if (!axs_headsetplay_generationIsCurrent(generation)) {
+                return;
+            }
+            os_unfair_lock_lock(&gAxsHeadsetPlayLock);
+            BOOL didPlay = gAxsHeadsetPlayDidPlay;
+            if (playing) {
+                gAxsHeadsetPlayDidPlay = YES;
+                didPlay = YES;
+            }
+            os_unfair_lock_unlock(&gAxsHeadsetPlayLock);
+            if (!playing && didPlay) {
+                axs_headsetplay_abortSession();
+                return;
+            }
+            if (!axs_headsetplay_sessionStillValid(generation)) {
+                return;
+            }
+            axs_headsetplay_watchPlayback(generation, remaining - 1);
+        });
+    });
+}
+
 static void axs_headsetplay_schedulePlayRetries(NSUInteger generation) {
     AxsHeadsetPlayConfig *config = [AxsHeadsetPlayConfig axs_headsetplay_shared];
     for (NSUInteger index = 0; index < kAxsHeadsetPlayRetryCount; index++) {
         int64_t delay = (int64_t)(kAxsHeadsetPlayRetryDelays[index] * NSEC_PER_SEC);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay), dispatch_get_main_queue(), ^{
-            if (!axs_headsetplay_generationIsCurrent(generation)) {
-                return;
-            }
             if (![config axs_headsetplay_isEnabled] || ![config axs_headsetplay_autoPlay]) {
                 return;
             }
-            void (^sendIfNeeded)(BOOL) = ^(BOOL playing) {
+            if (!axs_headsetplay_sessionStillValid(generation)) {
+                return;
+            }
+            axs_headsetplay_queryPlaying(^(BOOL playing) {
                 if (!axs_headsetplay_generationIsCurrent(generation)) {
                     return;
                 }
-                if ([config axs_headsetplay_skipIfPlaying] && playing) {
+                os_unfair_lock_lock(&gAxsHeadsetPlayLock);
+                BOOL didPlay = gAxsHeadsetPlayDidPlay;
+                if (playing) {
+                    gAxsHeadsetPlayDidPlay = YES;
+                    didPlay = YES;
+                }
+                os_unfair_lock_unlock(&gAxsHeadsetPlayLock);
+                if (playing || didPlay) {
+                    return;
+                }
+                if (!axs_headsetplay_sessionStillValid(generation)) {
                     return;
                 }
                 axs_headsetplay_sendPlay();
-            };
-            if ([config axs_headsetplay_skipIfPlaying]) {
-                axs_headsetplay_queryPlaying(sendIfNeeded);
-            } else {
-                sendIfNeeded(NO);
-            }
+                axs_headsetplay_watchPlayback(generation, 8);
+            });
         });
     }
 }
 
 static void axs_headsetplay_launchThenPlay(NSString *bundleID, NSUInteger generation) {
+    if (!axs_headsetplay_sessionStillValid(generation)) {
+        return;
+    }
     (void)axs_headsetplay_openApplicationSuspended(bundleID);
     AxsHeadsetPlayConfig *config = [AxsHeadsetPlayConfig axs_headsetplay_shared];
     if (![config axs_headsetplay_autoPlay]) {
@@ -298,6 +405,10 @@ static void axs_headsetplay_runLaunchAndPlay(NSUInteger routeWaitCount) {
     os_unfair_lock_lock(&gAxsHeadsetPlayLock);
     NSUInteger generation = gAxsHeadsetPlayGeneration;
     os_unfair_lock_unlock(&gAxsHeadsetPlayLock);
+    if (!axs_headsetplay_hasConnectedAudioDevice()) {
+        axs_headsetplay_abortSession();
+        return;
+    }
     BOOL hasBluetooth = axs_headsetplay_routeHasBluetoothOutput([AVAudioSession sharedInstance].currentRoute);
     if (!hasBluetooth && routeWaitCount < 2) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kAxsHeadsetPlayRouteWaitNs), dispatch_get_main_queue(), ^{
@@ -308,11 +419,20 @@ static void axs_headsetplay_runLaunchAndPlay(NSUInteger routeWaitCount) {
         });
         return;
     }
+    if (!hasBluetooth) {
+        return;
+    }
+    if (axs_headsetplay_shouldSkipBecauseOutOfEar()) {
+        return;
+    }
     void (^proceed)(BOOL) = ^(BOOL playing) {
         if (!axs_headsetplay_generationIsCurrent(generation)) {
             return;
         }
-        if ([config axs_headsetplay_skipIfPlaying] && playing) {
+        if (playing) {
+            os_unfair_lock_lock(&gAxsHeadsetPlayLock);
+            gAxsHeadsetPlayDidPlay = YES;
+            os_unfair_lock_unlock(&gAxsHeadsetPlayLock);
             return;
         }
         axs_headsetplay_launchThenPlay(bundleID, generation);
@@ -337,7 +457,7 @@ static void axs_headsetplay_scheduleAfterAudioConnect(void) {
     }
     NSTimeInterval now = [NSDate date].timeIntervalSince1970;
     os_unfair_lock_lock(&gAxsHeadsetPlayLock);
-    if (now - gAxsHeadsetPlayLastFire < kAxsHeadsetPlayCooldown) {
+    if (now - gAxsHeadsetPlayLastFire < kAxsHeadsetPlayCooldown && gAxsHeadsetPlayLastFire > 0) {
         os_unfair_lock_unlock(&gAxsHeadsetPlayLock);
         return;
     }
@@ -346,6 +466,7 @@ static void axs_headsetplay_scheduleAfterAudioConnect(void) {
         gAxsHeadsetPlayPending = nil;
     }
     gAxsHeadsetPlayGeneration += 1;
+    gAxsHeadsetPlayDidPlay = NO;
     dispatch_block_t work = dispatch_block_create(0, ^{
         os_unfair_lock_lock(&gAxsHeadsetPlayLock);
         gAxsHeadsetPlayPending = nil;
@@ -370,19 +491,13 @@ void axs_headsetplay_handleConnectedStatusChanged(void) {
     if (!hasBaseline) {
         return;
     }
-    Class managerClass = objc_getClass("BluetoothManager");
-    BluetoothManager *manager = managerClass
-        ? ((id (*)(id, SEL))objc_msgSend)(managerClass, @selector(sharedInstance))
-        : nil;
-    if (![manager respondsToSelector:@selector(connectedDevices)]) {
+    if (!axs_headsetplay_hasConnectedAudioDevice()) {
+        axs_headsetplay_abortSession();
         return;
     }
     BOOL foundAudio = NO;
-    for (id device in [manager connectedDevices]) {
-        NSString *address = nil;
-        if ([device respondsToSelector:@selector(address)]) {
-            address = ((NSString *(*)(id, SEL))objc_msgSend)(device, @selector(address));
-        }
+    for (id device in axs_headsetplay_connectedDevices()) {
+        NSString *address = axs_headsetplay_deviceAddress(device);
         if (address.length == 0 || [previous containsObject:address]) {
             continue;
         }
@@ -402,20 +517,15 @@ void axs_headsetplay_handleConnectNotification(NSNotification *notification) {
         axs_headsetplay_handleConnectedStatusChanged();
         return;
     }
-    axs_headsetplay_scheduleAfterAudioConnect();
+    axs_headsetplay_handleConnectedStatusChanged();
 }
 
 void axs_headsetplay_handleRouteChange(NSNotification *notification) {
     NSNumber *reason = notification.userInfo[AVAudioSessionRouteChangeReasonKey];
-    if (reason.unsignedIntegerValue != AVAudioSessionRouteChangeReasonNewDeviceAvailable) {
-        return;
-    }
-    AVAudioSessionRouteDescription *previous =
-        notification.userInfo[AVAudioSessionRouteChangePreviousRouteKey];
-    BOOL hadBluetooth = axs_headsetplay_routeHasBluetoothOutput(previous);
+    NSUInteger value = reason.unsignedIntegerValue;
     BOOL hasBluetooth = axs_headsetplay_routeHasBluetoothOutput([AVAudioSession sharedInstance].currentRoute);
-    if (hasBluetooth && !hadBluetooth) {
-        axs_headsetplay_scheduleAfterAudioConnect();
+    if (value == AVAudioSessionRouteChangeReasonOldDeviceUnavailable && !hasBluetooth) {
+        axs_headsetplay_abortSession();
     }
 }
 
@@ -434,12 +544,20 @@ void axs_headsetplay_start(void) {
         NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
         NSOperationQueue *queue = [NSOperationQueue mainQueue];
         static id axs_headsetplay_connectObserver;
+        static id axs_headsetplay_disconnectObserver;
         static id axs_headsetplay_routeObserver;
         axs_headsetplay_connectObserver = [center addObserverForName:@"BluetoothDeviceConnectSuccessNotification"
                                                               object:nil
                                                                queue:queue
                                                           usingBlock:^(NSNotification *notification) {
             axs_headsetplay_handleConnectNotification(notification);
+        }];
+        axs_headsetplay_disconnectObserver = [center addObserverForName:@"BluetoothDeviceDisconnectSuccessNotification"
+                                                                 object:nil
+                                                                  queue:queue
+                                                             usingBlock:^(NSNotification *notification) {
+            (void)notification;
+            axs_headsetplay_handleConnectedStatusChanged();
         }];
         axs_headsetplay_routeObserver = [center addObserverForName:AVAudioSessionRouteChangeNotification
                                                             object:nil
@@ -448,6 +566,7 @@ void axs_headsetplay_start(void) {
             axs_headsetplay_handleRouteChange(notification);
         }];
         (void)axs_headsetplay_connectObserver;
+        (void)axs_headsetplay_disconnectObserver;
         (void)axs_headsetplay_routeObserver;
     });
 }
