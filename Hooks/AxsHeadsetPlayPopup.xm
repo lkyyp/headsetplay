@@ -2,8 +2,10 @@
 #import <objc/runtime.h>
 #import "AxsHeadsetPlayPopup.h"
 
-static void axs_headsetplay_scheduleControllerDismiss(UIViewController *controller) {
-    if (!controller || axs_headsetplay_controllerWasScheduled(controller)) {
+static void axs_headsetplay_scheduleControllerDismiss(id candidate) {
+    if (![candidate isKindOfClass:[UIViewController class]]) return;
+    UIViewController *controller = (UIViewController *)candidate;
+    if (axs_headsetplay_controllerWasScheduled(controller)) {
         return;
     }
     axs_headsetplay_markControllerScheduled(controller);
