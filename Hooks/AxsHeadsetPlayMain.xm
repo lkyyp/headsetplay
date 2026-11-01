@@ -5,6 +5,9 @@
 #import "AxsHeadsetPlayController.h"
 #import "AxsHeadsetPlayPopup.h"
 
+@interface SBRemoteTransientOverlayViewController : UIViewController
+@end
+
 %group AxsHeadsetPlaySpringBoardBluetooth
 %hook BluetoothManager
 
