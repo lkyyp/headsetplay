@@ -90,7 +90,12 @@ static void axs_headsetplay_collectControllers(UIViewController *root, NSMutable
 }
 
 static void axs_headsetplay_dismissWindowsLookingLikeBatteryCard(void) {
-    NSArray<UIWindow *> *windows = [UIApplication sharedApplication].windows;
+    NSMutableArray<UIWindow *> *windows = [NSMutableArray array];
+for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+    if ([scene isKindOfClass:[UIWindowScene class]]) {
+        [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+    }
+}
     for (UIWindow *window in windows) {
         NSMutableArray<UIViewController *> *controllers = [NSMutableArray array];
         axs_headsetplay_collectControllers(window.rootViewController, controllers);
