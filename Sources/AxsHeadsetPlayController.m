@@ -182,7 +182,7 @@ static NSSet<NSString *> *axs_headsetplay_connectedAddresses(void) {
     }
     NSMutableSet<NSString *> *addresses = [NSMutableSet set];
     for (id device in [manager connectedDevices]) {
-        NSString *address = [device respondsToSelector:@selector(address)] ? [device address] : nil;
+        NSString *address = [device respondsToSelector:@selector(address)] ? [(BluetoothDevice *)device address] : nil;
         if (address.length > 0) {
             [addresses addObject:address];
         }
@@ -273,7 +273,7 @@ void axs_headsetplay_handleConnectedStatusChanged(void) {
     }
     BOOL foundAudio = NO;
     for (id device in [manager connectedDevices]) {
-        NSString *address = [device respondsToSelector:@selector(address)] ? [device address] : nil;
+        NSString *address = [device respondsToSelector:@selector(address)] ? [(BluetoothDevice *)device address] : nil;
         if (address.length == 0 || [previous containsObject:address]) {
             continue;
         }
