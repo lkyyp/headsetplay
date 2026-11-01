@@ -28,3 +28,16 @@
 @interface UIApplication (AxsHeadsetPlayLaunch)
 - (BOOL)launchApplicationWithIdentifier:(NSString *)identifier suspended:(BOOL)suspended;
 @end
+
+@interface FBSSystemService : NSObject
++ (instancetype)sharedService;
+- (unsigned int)createClientPort;
+- (void)openApplication:(NSString *)identifier options:(NSDictionary *)options withResult:(id)result;
+- (void)openApplication:(NSString *)identifier options:(NSDictionary *)options clientPort:(unsigned int)port withResult:(id)result;
+@end
+
+@interface SBMediaController : NSObject
++ (instancetype)sharedInstance;
+- (BOOL)play;
+- (BOOL)isPlaying;
+@end
