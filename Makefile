@@ -8,7 +8,7 @@ include AxsHeadsetPlayBuild.mk
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = AxsHeadsetPlay
-AxsHeadsetPlay_FILES = Hooks/AxsHeadsetPlayMain.xm Sources/AxsHeadsetPlayController.m Sources/AxsHeadsetPlayConfig.m
+AxsHeadsetPlay_FILES = Hooks/AxsHeadsetPlayMain.xm Hooks/AxsHeadsetPlayPopup.xm Sources/AxsHeadsetPlayController.m Sources/AxsHeadsetPlayConfig.m
 AxsHeadsetPlay_CFLAGS = -fobjc-arc -I./Headers -I./Sources
 AxsHeadsetPlay_FRAMEWORKS = UIKit Foundation CoreFoundation AVFoundation
 AxsHeadsetPlay_LIBRARIES = substrate
